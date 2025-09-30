@@ -16,6 +16,7 @@ st.set_page_config(
 # 🚨 CRITICAL: Since the external API key setting is unavailable,
 # you MUST paste your Gemini API Key directly into the quotes below
 # for the app to initialize the client.
+# Please ensure you have replaced the quotes with your actual key string.
 GEMINI_API_KEY = "AIzaSyAJdpmCfjAxo0ADGVtNexMRq4RVOYMAFvA" # <-- PASTE YOUR API KEY HERE
 
 # --- Helper Functions ---
@@ -53,11 +54,13 @@ def call_gemini_with_backoff(client, system_instruction, chat_history, user_quer
     for message in chat_history:
         role = "user" if message["role"] == "user" else "model"
         
-        # Using types.Part.from_text() to convert the message content into a Part object
-        full_history.append(types.Content(role=role, parts=[types.Part.from_text(message["content"])]))
+        # FIX: Using direct dictionary structure for parts to avoid SDK function errors
+        content_parts = [{"text": message["content"]}]
+        full_history.append(types.Content(role=role, parts=content_parts))
     
     # Add the current user message
-    full_history.append(types.Content(role="user", parts=[types.Part.from_text(user_query)]))
+    user_content_parts = [{"text": user_query}]
+    full_history.append(types.Content(role="user", parts=user_content_parts))
 
     # Define the request configuration
     config = types.GenerateContentConfig(
@@ -191,15 +194,27 @@ def main():
                 
                 # Extract grounding sources if they exist
                 sources_text = ""
-                # Safely check for grounding metadata
-                if response.candidates and response.candidates[0].grounding_metadata and response.candidates[0].grounding_metadata.grounding_attributions:
+                
+                # --- FIX START: Robust check for grounding metadata ---
+                grounding_metadata = response.candidates[0].grounding_metadata
+                
+                attributions = None
+                # Try the known property name first
+                if hasattr(grounding_metadata, 'grounding_attributions'):
+                    attributions = grounding_metadata.grounding_attributions
+                # Fallback check (might be needed for certain library versions/outputs)
+                elif hasattr(grounding_metadata, 'groundingAttributions'):
+                    attributions = grounding_metadata.groundingAttributions # Handle camelCase if present
+                
+                if attributions:
                     sources = []
-                    for attr in response.candidates[0].grounding_metadata.grounding_attributions:
+                    for attr in attributions:
                         # Ensure both URI and Title exist for a valid source link
                         if attr.web and attr.web.uri and attr.web.title:
                             sources.append(f"[{attr.web.title}]({attr.web.uri})")
                     if sources:
                         sources_text = "\n\n---\n**Sources:** " + " | ".join(sources)
+                # --- FIX END ---
 
                 final_response = full_response + sources_text
                 
