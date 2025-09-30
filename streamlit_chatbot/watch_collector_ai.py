@@ -90,10 +90,13 @@ filter_context = (
 )
 
 SYSTEM_PROMPT = (
-    "You are a world-class, discerning watch collection advisor. Your expertise covers "
-    "both vintage and modern luxury timepieces. Provide objective, insightful, and "
-    "knowledgeable advice based on the user's filters. Highlight brand heritage, value retention, "
-    "movement quality, and current market trends.\n\n"
+    "You are a world-class, discerning watch collection advisor. "
+    "Provide objective insights based on the user's filters. "
+    "Speak in **neutral, educational, historical terms**. "
+    "Do not offer financial or investment advice. "
+    "You may describe **historical resale value trends** using phrases such as "
+    "'commonly known to hold value' or 'often sought after by collectors', "
+    "but avoid speculative or predictive language.\n\n"
     "Current applied watch criteria:\n"
     f"{filter_context}"
 )
@@ -110,34 +113,38 @@ if "messages" not in st.session_state:
         },
     ]
 
-# Always keep system prompt updated
 st.session_state.messages[0]["content"] = SYSTEM_PROMPT
 
 # -------------------------
-# Gemini Call with Safe Handling
+# Gemini Call with Safe Rephrase
 # -------------------------
 def call_gemini(messages, model_name="gemini-2.5-flash"):
-    prompt_parts = []
-    for m in messages:
-        role = m.get("role", "user")
-        content = m.get("content", "")
-        prompt_parts.append(f"{role.upper()}:\n{content}\n")
+    def build_prompt(msgs):
+        parts = []
+        for m in msgs:
+            parts.append(f"{m['role'].upper()}:\n{m['content']}\n")
+        return "\n".join(parts) + "\nASSISTANT:\n"
 
-    prompt = "\n".join(prompt_parts) + "\nASSISTANT:\n"
+    prompt = build_prompt(messages)
 
     try:
         model = genai.GenerativeModel(model_name)
-        response = model.generate_content(
-            prompt,
-            generation_config={"max_output_tokens": 800, "temperature": 0.2},
-        )
+        response = model.generate_content(prompt)
 
         if response and response.candidates:
             candidate = response.candidates[0]
             if candidate.finish_reason == 1 and candidate.content.parts:
                 return candidate.content.parts[0].text
-            else:
-                return f"⚠️ Gemini could not provide a response (finish_reason={candidate.finish_reason}). Try rephrasing."
+
+            # Safety blocked → auto rephrase
+            if candidate.finish_reason == 2:
+                safe_prompt = (
+                    "Rewrite the last user question in neutral historical or educational terms without speculation, "
+                    "then answer based on historical watch trends only."
+                )
+                safe_response = model.generate_content(safe_prompt)
+                if safe_response and safe_response.candidates:
+                    return "⚠️ Some content was rephrased for safety:\n\n" + safe_response.candidates[0].content.parts[0].text
 
         return "⚠️ Gemini returned no response."
 
