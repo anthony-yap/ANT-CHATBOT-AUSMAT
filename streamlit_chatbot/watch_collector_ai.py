@@ -1,10 +1,9 @@
-# watch_advisor_simple.py
 import os
 import streamlit as st
 import google.generativeai as genai
 
 # -------------------------
-# Simple configuration
+# Page configuration
 # -------------------------
 st.set_page_config(
     page_title="Gemini Watch Collection Advisor (Simple)",
@@ -12,7 +11,9 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-# Read API key from environment or Streamlit secrets
+# -------------------------
+# API Key Setup
+# -------------------------
 GOOGLE_API_KEY = (
     st.secrets["GOOGLE_API_KEY"]
     if "GOOGLE_API_KEY" in st.secrets
@@ -20,13 +21,9 @@ GOOGLE_API_KEY = (
 )
 
 if not GOOGLE_API_KEY:
-    st.error(
-        "Missing Google API key. Add it to Streamlit secrets (recommended) or set the "
-        "environment variable GOOGLE_API_KEY."
-    )
+    st.error("Missing Google API key. Add it in Streamlit secrets or env var.")
     st.stop()
 
-# Configure the google.generativeai library
 try:
     genai.configure(api_key=GOOGLE_API_KEY)
 except Exception as e:
@@ -34,7 +31,7 @@ except Exception as e:
     st.stop()
 
 # -------------------------
-# Sidebar: Filters (kept as-is)
+# Sidebar Filters
 # -------------------------
 st.sidebar.title("⌚ Filter Watch Collection")
 st.sidebar.markdown("---")
@@ -82,7 +79,7 @@ st.sidebar.markdown("---")
 st.sidebar.caption("The AI will use these filters to refine its advice.")
 
 # -------------------------
-# System prompt and helpers
+# System Prompt Setup
 # -------------------------
 filter_context = (
     f"Gender preference: {selected_gender}.\n"
@@ -94,33 +91,30 @@ filter_context = (
 
 SYSTEM_PROMPT = (
     "You are a world-class, discerning watch collection advisor. Your expertise covers "
-    "both vintage and modern luxury timepieces, spanning all price points and complexities. "
-    "Provide objective, insightful, and knowledgeable advice based on the user's filters. "
-    "Highlight brand heritage, long-term value retention, movement quality, and current market trends. "
-    "Suggest specific models and brands that fit the user's criteria.\n\n"
+    "both vintage and modern luxury timepieces. Provide objective, insightful, and "
+    "knowledgeable advice based on the user's filters. Highlight brand heritage, value retention, "
+    "movement quality, and current market trends.\n\n"
     "Current applied watch criteria:\n"
     f"{filter_context}"
 )
 
 # -------------------------
-# Session state: chat history and initialization
+# Initialize chat memory
 # -------------------------
 if "messages" not in st.session_state:
-    st.session_state.messages = [{"role": "system", "content": SYSTEM_PROMPT}]
-    st.session_state.messages.append(
+    st.session_state.messages = [
+        {"role": "system", "content": SYSTEM_PROMPT},
         {
             "role": "assistant",
-            "content": (
-                "Hello! I'm your Watch Collection Advisor. Use the sidebar filters to set preferences, "
-                "then ask me for recommendations or market insights."
-            ),
-        }
-    )
+            "content": "Hello! I'm your Watch Collection Advisor. Ask me anything about watches based on your filters.",
+        },
+    ]
 
-st.session_state.messages[0] = {"role": "system", "content": SYSTEM_PROMPT}
+# Always keep system prompt updated
+st.session_state.messages[0]["content"] = SYSTEM_PROMPT
 
 # -------------------------
-# Updated Gemini Call Function (No Streaming, Uses generate_content)
+# Gemini Call with Safe Handling
 # -------------------------
 def call_gemini(messages, model_name="gemini-2.5-flash"):
     prompt_parts = []
@@ -135,17 +129,23 @@ def call_gemini(messages, model_name="gemini-2.5-flash"):
         model = genai.GenerativeModel(model_name)
         response = model.generate_content(
             prompt,
-            generation_config={
-                "max_output_tokens": 800,
-                "temperature": 0.2,
-            }
+            generation_config={"max_output_tokens": 800, "temperature": 0.2},
         )
-        return response.text
+
+        if response and response.candidates:
+            candidate = response.candidates[0]
+            if candidate.finish_reason == 1 and candidate.content.parts:
+                return candidate.content.parts[0].text
+            else:
+                return f"⚠️ Gemini could not provide a response (finish_reason={candidate.finish_reason}). Try rephrasing."
+
+        return "⚠️ Gemini returned no response."
+
     except Exception as e:
         return f"Error calling Gemini model: {e}"
 
 # -------------------------
-# UI: chat display and input
+# UI
 # -------------------------
 st.title("🗣️ Chat with the Watch Collection Advisor (Simple)")
 
@@ -155,24 +155,18 @@ for msg in st.session_state.messages:
     with st.chat_message(msg["role"]):
         st.markdown(msg["content"])
 
-user_prompt = st.chat_input("Ask a question about your perfect watch...")
+user_input = st.chat_input("Ask a question about your perfect watch...")
 
-if user_prompt:
-    st.session_state.messages.append({"role": "user", "content": user_prompt})
+if user_input:
+    st.session_state.messages.append({"role": "user", "content": user_input})
     with st.chat_message("user"):
-        st.markdown(user_prompt)
+        st.markdown(user_input)
 
     with st.chat_message("assistant"):
-        placeholder = st.empty()
-        placeholder.markdown("Thinking...")
+        reply = call_gemini(st.session_state.messages)
+        st.markdown(reply)
 
-        assistant_reply = call_gemini(st.session_state.messages, model_name="gemini-2.5-flash")
-        placeholder.markdown(assistant_reply)
-
-    st.session_state.messages.append({"role": "assistant", "content": assistant_reply})
+    st.session_state.messages.append({"role": "assistant", "content": reply})
 
 st.markdown("---")
-st.caption(
-    "Notes: This app keeps conversation memory in session state. "
-    "Do not paste production API keys in source code — use Streamlit secrets or environment variables."
-)
+st.caption("Session memory is enabled. You can reset the page to restart.")
