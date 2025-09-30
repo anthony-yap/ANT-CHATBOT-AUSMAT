@@ -27,7 +27,6 @@ if not GOOGLE_API_KEY:
     st.stop()
 
 # Configure the google.generativeai library
-# NOTE: genai.configure() is the usual pattern for this library.
 try:
     genai.configure(api_key=GOOGLE_API_KEY)
 except Exception as e:
@@ -107,9 +106,7 @@ SYSTEM_PROMPT = (
 # Session state: chat history and initialization
 # -------------------------
 if "messages" not in st.session_state:
-    # messages will be a list of dicts: {"role": "system/user/assistant", "content": "..."}
     st.session_state.messages = [{"role": "system", "content": SYSTEM_PROMPT}]
-    # Add a friendly assistant greeting
     st.session_state.messages.append(
         {
             "role": "assistant",
@@ -120,56 +117,31 @@ if "messages" not in st.session_state:
         }
     )
 
-# Update the system prompt in session state if filters changed (so subsequent replies use latest filters)
-# We keep a dedicated system entry at messages[0]
 st.session_state.messages[0] = {"role": "system", "content": SYSTEM_PROMPT}
 
 # -------------------------
-# Helper: call Gemini (simple, non-streaming)
+# Updated Gemini Call Function (No Streaming, Uses generate_content)
 # -------------------------
 def call_gemini(messages, model_name="gemini-2.5-flash"):
-    """
-    messages: list of {"role": "system/user/assistant", "content": str}
-    Returns: assistant reply string
-    """
-    # Build a single prompt by joining the messages in chat format
-    # This approach ensures the model sees the conversation (memory is handled locally).
     prompt_parts = []
     for m in messages:
         role = m.get("role", "user")
         content = m.get("content", "")
-        # simple role tokens to make conversation clearer to the model
         prompt_parts.append(f"{role.upper()}:\n{content}\n")
 
     prompt = "\n".join(prompt_parts) + "\nASSISTANT:\n"
 
     try:
-        # NOTE: different versions of google.generativeai may expose different function names.
-        # The common pattern is something like genai.generate_text() or genai.generate(). If your
-        # installed package uses a different function, replace the call below accordingly.
-        #
-        # This example uses `genai.generate_text` (replace if necessary).
-        response = genai.generate_text(
-            model=model_name,
-            input=prompt,
-            max_output_tokens=800,
-            temperature=0.2,
+        model = genai.GenerativeModel(model_name)
+        response = model.generate_content(
+            prompt,
+            generation_config={
+                "max_output_tokens": 800,
+                "temperature": 0.2,
+            }
         )
-        # Many versions return .text or .output[0].content -- try resilient extraction:
-        if hasattr(response, "text") and response.text:
-            return response.text.strip()
-        if hasattr(response, "output") and response.output:
-            # if output is a list of content dicts
-            first = response.output[0]
-            if isinstance(first, dict) and "content" in first:
-                return first["content"].strip()
-            if isinstance(first, str):
-                return first.strip()
-
-        # fallback: string representation
-        return str(response).strip()
+        return response.text
     except Exception as e:
-        # Return a friendly error message to show in chat
         return f"Error calling Gemini model: {e}"
 
 # -------------------------
@@ -177,43 +149,30 @@ def call_gemini(messages, model_name="gemini-2.5-flash"):
 # -------------------------
 st.title("🗣️ Chat with the Watch Collection Advisor (Simple)")
 
-# Render messages
 for msg in st.session_state.messages:
     if msg["role"] == "system":
-        # don't display system messages to the user
         continue
     with st.chat_message(msg["role"]):
         st.markdown(msg["content"])
 
-# Input box
 user_prompt = st.chat_input("Ask a question about your perfect watch...")
 
 if user_prompt:
-    # Add user message to history
     st.session_state.messages.append({"role": "user", "content": user_prompt})
     with st.chat_message("user"):
         st.markdown(user_prompt)
 
-    # Call Gemini (non-streaming)
     with st.chat_message("assistant"):
         placeholder = st.empty()
         placeholder.markdown("Thinking...")
 
-        # Call the model with the full conversation (memory preserved in messages)
         assistant_reply = call_gemini(st.session_state.messages, model_name="gemini-2.5-flash")
-
-        # Show the response
         placeholder.markdown(assistant_reply)
 
-    # Save assistant reply to history
     st.session_state.messages.append({"role": "assistant", "content": assistant_reply})
 
-# -------------------------
-# Footer: quick tips
-# -------------------------
 st.markdown("---")
 st.caption(
-    "Notes: This simplified app keeps conversation memory inside Streamlit session state "
-    "and sends the entire conversation to the Gemini model each time. "
-    "Do NOT paste production API keys into source files; use Streamlit secrets or environment variables."
+    "Notes: This app keeps conversation memory in session state. "
+    "Do not paste production API keys in source code — use Streamlit secrets or environment variables."
 )
