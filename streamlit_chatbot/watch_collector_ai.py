@@ -1,9 +1,9 @@
 import streamlit as st
 import json
 import time
-from google import generativeai
-from google.generativeai import types
-from google.generativeai.errors import APIError
+from google import genai
+from google.genai import types
+from google.genai.errors import APIError
 
 # --- Configuration and Initialization ---
 # Set the page configuration for a wide, attractive layout
